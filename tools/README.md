@@ -27,4 +27,4 @@ python .\tools\hc06_ble_uart_test.py --scan
 python .\tools\hc06_ble_uart_test.py --address "8E:E9:ED:0A:EA:0C"
 ```
 
-No teste feito neste PC, o `HC-06` apareceu como BLE em `8E:E9:ED:0A:EA:0C`, com servico `FFE0` e caracteristicas `FFE1`/`FFE2`.
+No teste feito neste PC, o `HC-06` apareceu como BLE em `8E:E9:ED:0A:EA:0C`, com servico `FFE0` e caracteristicas `FFE1`/`FFE2`. O script usa `FFE2` por padrao para escrita.

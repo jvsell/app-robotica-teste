@@ -44,6 +44,7 @@ public class MainActivity extends Activity {
     private static final UUID SPP_UUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB");
     private static final UUID BLE_UART_SERVICE_UUID = UUID.fromString("0000FFE0-0000-1000-8000-00805F9B34FB");
     private static final UUID BLE_UART_CHARACTERISTIC_UUID = UUID.fromString("0000FFE1-0000-1000-8000-00805F9B34FB");
+    private static final UUID BLE_UART_WRITE_CHARACTERISTIC_UUID = UUID.fromString("0000FFE2-0000-1000-8000-00805F9B34FB");
     private static final UUID EMPTY_UUID = UUID.fromString("00000000-0000-0000-0000-000000000000");
     private static final long BLE_CONNECT_TIMEOUT_MS = 12000;
 
@@ -67,7 +68,7 @@ public class MainActivity extends Activity {
         @Override
         public void run() {
             sendJoystickCommand();
-            handler.postDelayed(this, 80);
+            handler.postDelayed(this, bleConnected ? 200 : 80);
         }
     };
 
@@ -318,7 +319,7 @@ public class MainActivity extends Activity {
             connectingBle = false;
             handler.post(() -> {
                 statusText.setText("Conectado BLE: " + selectedDevice.getName());
-                appendConnectionLog("BLE UART pronto em FFE1.");
+                appendConnectionLog("BLE UART pronto para escrita.");
                 connectButton.setText("Desconectar");
                 connectButton.setEnabled(true);
                 handler.removeCallbacks(commandLoop);
@@ -330,8 +331,14 @@ public class MainActivity extends Activity {
     private BluetoothGattCharacteristic findBleWriteCharacteristic(BluetoothGatt gatt) {
         BluetoothGattService uartService = gatt.getService(BLE_UART_SERVICE_UUID);
         if (uartService != null) {
+            BluetoothGattCharacteristic writeCharacteristic = uartService.getCharacteristic(BLE_UART_WRITE_CHARACTERISTIC_UUID);
+            if (isWritable(writeCharacteristic)) {
+                appendConnectionLog("BLE usando FFE2 para escrita.");
+                return writeCharacteristic;
+            }
             BluetoothGattCharacteristic uartCharacteristic = uartService.getCharacteristic(BLE_UART_CHARACTERISTIC_UUID);
             if (isWritable(uartCharacteristic)) {
+                appendConnectionLog("BLE usando FFE1 para escrita.");
                 return uartCharacteristic;
             }
         }

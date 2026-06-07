@@ -12,6 +12,7 @@ from bleak import BleakClient, BleakScanner  # noqa: E402
 
 UART_SERVICE_UUID = "0000ffe0-0000-1000-8000-00805f9b34fb"
 UART_CHARACTERISTIC_UUID = "0000ffe1-0000-1000-8000-00805f9b34fb"
+UART_WRITE_CHARACTERISTIC_UUID = "0000ffe2-0000-1000-8000-00805f9b34fb"
 
 
 async def scan_devices(timeout):
@@ -55,16 +56,17 @@ async def run_test(args):
             for characteristic in service.characteristics:
                 print(f"  Caracteristica: {characteristic.uuid} props={characteristic.properties}")
 
-        print(f"Enviando em FFE1: {command.strip()}")
+        characteristic_uuid = args.characteristic.lower()
+        print(f"Enviando em {characteristic_uuid}: {command.strip()}")
         await client.write_gatt_char(
-            UART_CHARACTERISTIC_UUID,
+            characteristic_uuid,
             command.encode("ascii"),
             response=False,
         )
         time.sleep(args.hold)
         print("Enviando parada: F0T0D0E0")
         await client.write_gatt_char(
-            UART_CHARACTERISTIC_UUID,
+            characteristic_uuid,
             b"F0T0D0E0\n",
             response=False,
         )
@@ -77,6 +79,11 @@ def main():
     parser.add_argument("--address", help="Endereco BLE/MAC do modulo.")
     parser.add_argument("--name", default="HC-06", help="Nome para buscar se --address nao for informado.")
     parser.add_argument("--command", default="F120T0D0E0", help="Comando a enviar.")
+    parser.add_argument(
+        "--characteristic",
+        default=UART_WRITE_CHARACTERISTIC_UUID,
+        help="Caracteristica BLE para escrita. Padrao: FFE2.",
+    )
     parser.add_argument("--hold", type=float, default=0.5, help="Tempo antes de enviar parada.")
     parser.add_argument("--timeout", type=float, default=10.0, help="Timeout de scan/conexao.")
     parser.add_argument("--scan", action="store_true", help="Apenas lista dispositivos BLE.")
