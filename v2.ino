@@ -38,8 +38,8 @@ void loop() {
  int velocidadeMaxima = max(max(f, t), max(d, e));
  int sentido = (f >= t) ? 1 : -1;
 
- int velocidadeEsquerdo = (f - t) + (d - e) * sentido;
- int velocidadeDireito = (f - t) + (e - d) * sentido;
+ int velocidadeEsquerdo = (f - t) + (e - d) * sentido;
+ int velocidadeDireito = (f - t) + (d - e) * sentido;
  bool in1, in2;
  int pwmEsquerdo;
 
