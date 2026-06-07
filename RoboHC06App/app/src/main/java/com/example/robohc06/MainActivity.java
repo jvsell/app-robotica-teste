@@ -44,6 +44,7 @@ public class MainActivity extends Activity {
     private BluetoothSocket socket;
     private OutputStream outputStream;
     private TextView statusText;
+    private TextView logText;
     private Button connectButton;
     private JoystickView joystickView;
 
@@ -91,6 +92,12 @@ public class MainActivity extends Activity {
         statusText.setGravity(Gravity.CENTER);
         statusText.setPadding(0, 16, 0, 16);
 
+        logText = new TextView(this);
+        logText.setText("Log: aguardando conexao.");
+        logText.setTextSize(13);
+        logText.setTextColor(Color.rgb(55, 65, 81));
+        logText.setPadding(0, 8, 0, 8);
+
         Spinner deviceSpinner = new Spinner(this);
         deviceSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
             @Override
@@ -131,6 +138,7 @@ public class MainActivity extends Activity {
 
         root.addView(title, matchWrap);
         root.addView(statusText, matchWrap);
+        root.addView(logText, matchWrap);
         root.addView(deviceSpinner, matchWrap);
         root.addView(connectButton, matchWrap);
         root.addView(stopButton, matchWrap);
@@ -207,6 +215,7 @@ public class MainActivity extends Activity {
         }
 
         statusText.setText("Conectando...");
+        setConnectionLog("Tentando conectar em " + selectedDevice.getAddress());
         connectButton.setEnabled(false);
 
         new Thread(() -> {
@@ -216,6 +225,7 @@ public class MainActivity extends Activity {
                 outputStream = nextSocket.getOutputStream();
                 handler.post(() -> {
                     statusText.setText("Conectado: " + selectedDevice.getName());
+                    setConnectionLog("Conexao aberta. Enviando comandos F/T/D/E.");
                     connectButton.setText("Desconectar");
                     connectButton.setEnabled(true);
                     handler.removeCallbacks(commandLoop);
@@ -237,39 +247,46 @@ public class MainActivity extends Activity {
     private BluetoothSocket openSerialSocket(BluetoothDevice device) throws IOException {
         IOException lastError = null;
 
-        BluetoothSocket secureSocket = null;
-        try {
-            secureSocket = device.createRfcommSocketToServiceRecord(SPP_UUID);
-            secureSocket.connect();
-            return secureSocket;
-        } catch (IOException error) {
-            lastError = error;
-            closeQuietly(secureSocket);
-        }
-
-        BluetoothSocket insecureSocket = null;
-        try {
-            insecureSocket = device.createInsecureRfcommSocketToServiceRecord(SPP_UUID);
-            insecureSocket.connect();
-            return insecureSocket;
-        } catch (IOException error) {
-            lastError = error;
-            closeQuietly(insecureSocket);
-        }
-
         BluetoothSocket channelSocket = null;
         try {
+            setConnectionLog("Tentativa 1: canal RFCOMM 1.");
             Method method = device.getClass().getMethod("createRfcommSocket", int.class);
             channelSocket = (BluetoothSocket) method.invoke(device, 1);
             channelSocket.connect();
             return channelSocket;
         } catch (Exception error) {
             closeQuietly(channelSocket);
-            if (lastError != null) {
-                throw lastError;
-            }
-            throw new IOException(error);
+            lastError = error instanceof IOException ? (IOException) error : new IOException(error);
+            setConnectionLog("Canal 1 falhou: " + shortError(error));
+            sleepBeforeRetry();
         }
+
+        BluetoothSocket insecureSocket = null;
+        try {
+            setConnectionLog("Tentativa 2: SPP inseguro.");
+            insecureSocket = device.createInsecureRfcommSocketToServiceRecord(SPP_UUID);
+            insecureSocket.connect();
+            return insecureSocket;
+        } catch (IOException error) {
+            lastError = error;
+            closeQuietly(insecureSocket);
+            setConnectionLog("SPP inseguro falhou: " + shortError(error));
+            sleepBeforeRetry();
+        }
+
+        BluetoothSocket secureSocket = null;
+        try {
+            setConnectionLog("Tentativa 3: SPP seguro.");
+            secureSocket = device.createRfcommSocketToServiceRecord(SPP_UUID);
+            secureSocket.connect();
+            return secureSocket;
+        } catch (IOException error) {
+            lastError = error;
+            closeQuietly(secureSocket);
+            setConnectionLog("SPP seguro falhou: " + shortError(error));
+        }
+
+        throw lastError == null ? new IOException("Nenhuma tentativa abriu o socket.") : lastError;
     }
 
     private void disconnect() {
@@ -282,6 +299,7 @@ public class MainActivity extends Activity {
         if (statusText != null) {
             statusText.setText("Desconectado.");
         }
+        setConnectionLog("Desconectado.");
     }
 
     private void closeConnection() {
@@ -346,6 +364,30 @@ public class MainActivity extends Activity {
             return;
         }
         Toast.makeText(this, message, Toast.LENGTH_SHORT).show();
+    }
+
+    private void setConnectionLog(String message) {
+        handler.post(() -> {
+            if (logText != null) {
+                logText.setText("Log: " + message);
+            }
+        });
+    }
+
+    private String shortError(Exception error) {
+        String message = error.getMessage();
+        if (message == null || message.trim().isEmpty()) {
+            return error.getClass().getSimpleName();
+        }
+        return message;
+    }
+
+    private void sleepBeforeRetry() {
+        try {
+            Thread.sleep(700);
+        } catch (InterruptedException error) {
+            Thread.currentThread().interrupt();
+        }
     }
 
     public static class JoystickView extends View {
