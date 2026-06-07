@@ -57,6 +57,8 @@ public class MainActivity extends Activity {
     private BluetoothGatt bluetoothGatt;
     private BluetoothGattCharacteristic bleWriteCharacteristic;
     private boolean bleConnected = false;
+    private boolean bleWriteInProgress = false;
+    private String pendingBleCommand = null;
     private TextView statusText;
     private TextView logText;
     private final StringBuilder connectionLog = new StringBuilder();
@@ -326,6 +328,19 @@ public class MainActivity extends Activity {
                 handler.post(commandLoop);
             });
         }
+
+        @Override
+        public void onCharacteristicWrite(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic, int status) {
+            bleWriteInProgress = false;
+            if (status != BluetoothGatt.GATT_SUCCESS) {
+                appendConnectionLog("BLE write callback falhou: " + status);
+            }
+            String nextCommand = pendingBleCommand;
+            pendingBleCommand = null;
+            if (nextCommand != null && bleConnected) {
+                writeBleRaw(nextCommand);
+            }
+        }
     };
 
     private BluetoothGattCharacteristic findBleWriteCharacteristic(BluetoothGatt gatt) {
@@ -532,6 +547,8 @@ public class MainActivity extends Activity {
     private void closeGattOnly() {
         connectingBle = false;
         bleConnected = false;
+        bleWriteInProgress = false;
+        pendingBleCommand = null;
         bleWriteCharacteristic = null;
         if (bluetoothGatt != null) {
             try {
@@ -585,8 +602,13 @@ public class MainActivity extends Activity {
         if (bluetoothGatt == null || bleWriteCharacteristic == null) {
             return;
         }
+        if (bleWriteInProgress) {
+            pendingBleCommand = command;
+            return;
+        }
         byte[] payload = command.getBytes(StandardCharsets.US_ASCII);
         try {
+            bleWriteInProgress = true;
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 int result = bluetoothGatt.writeCharacteristic(
                         bleWriteCharacteristic,
@@ -594,16 +616,19 @@ public class MainActivity extends Activity {
                         BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
                 );
                 if (result != BluetoothGatt.GATT_SUCCESS) {
-                    appendConnectionLog("BLE write falhou: " + result);
+                    bleWriteInProgress = false;
+                    appendConnectionLog("BLE write iniciou com falha: " + result);
                 }
             } else {
                 bleWriteCharacteristic.setValue(payload);
                 bleWriteCharacteristic.setWriteType(BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT);
                 if (!bluetoothGatt.writeCharacteristic(bleWriteCharacteristic)) {
-                    appendConnectionLog("BLE write falhou.");
+                    bleWriteInProgress = false;
+                    appendConnectionLog("BLE write iniciou com falha.");
                 }
             }
         } catch (SecurityException error) {
+            bleWriteInProgress = false;
             appendConnectionLog("BLE write sem permissao: " + shortError(error));
             disconnect();
         }
