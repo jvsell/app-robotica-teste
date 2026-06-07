@@ -270,8 +270,8 @@ public class MainActivity extends Activity {
     private void sendJoystickCommand() {
         int forward = joystickView.getForward();
         int backward = joystickView.getBackward();
-        int right = joystickView.getRight();
-        int left = joystickView.getLeft();
+        int right = joystickView.getRightCommand();
+        int left = joystickView.getLeftCommand();
         sendRawCommand("F" + forward + "T" + backward + "D" + right + "E" + left + "\n");
     }
 
@@ -372,11 +372,11 @@ public class MainActivity extends Activity {
             return scaleAxis(y - getHeight() / 2f);
         }
 
-        public int getRight() {
+        public int getRightCommand() {
             return scaleAxis(x - getWidth() / 2f);
         }
 
-        public int getLeft() {
+        public int getLeftCommand() {
             return scaleAxis(-(x - getWidth() / 2f));
         }
 
