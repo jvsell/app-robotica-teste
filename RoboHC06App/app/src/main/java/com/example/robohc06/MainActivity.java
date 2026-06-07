@@ -37,6 +37,7 @@ import java.util.UUID;
 public class MainActivity extends Activity {
     private static final int REQUEST_BLUETOOTH_CONNECT = 10;
     private static final UUID SPP_UUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB");
+    private static final UUID EMPTY_UUID = UUID.fromString("00000000-0000-0000-0000-000000000000");
 
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final List<BluetoothDevice> pairedDevices = new ArrayList<>();
@@ -161,8 +162,11 @@ public class MainActivity extends Activity {
 
     private void requestBluetoothPermissionIfNeeded() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
-                && checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
-            requestPermissions(new String[]{Manifest.permission.BLUETOOTH_CONNECT}, REQUEST_BLUETOOTH_CONNECT);
+                && (!hasBluetoothConnectPermission() || !hasBluetoothScanPermission())) {
+            requestPermissions(new String[]{
+                    Manifest.permission.BLUETOOTH_CONNECT,
+                    Manifest.permission.BLUETOOTH_SCAN
+            }, REQUEST_BLUETOOTH_CONNECT);
         }
     }
 
@@ -223,6 +227,7 @@ public class MainActivity extends Activity {
 
         new Thread(() -> {
             try {
+                cancelDiscoveryIfAllowed();
                 BluetoothSocket nextSocket = openSerialSocket(selectedDevice);
                 socket = nextSocket;
                 outputStream = nextSocket.getOutputStream();
@@ -251,32 +256,18 @@ public class MainActivity extends Activity {
         IOException lastError = null;
         List<UUID> uuids = getCandidateUuids(device);
 
-        BluetoothSocket channelSocket = null;
-        try {
-            appendConnectionLog("Tentativa 1: canal RFCOMM 1.");
-            Method method = device.getClass().getMethod("createRfcommSocket", int.class);
-            channelSocket = (BluetoothSocket) method.invoke(device, 1);
-            channelSocket.connect();
-            return channelSocket;
-        } catch (Exception error) {
-            closeQuietly(channelSocket);
-            lastError = error instanceof IOException ? (IOException) error : new IOException(error);
-            appendConnectionLog("Canal 1 falhou: " + shortError(error));
-            sleepBeforeRetry();
-        }
-
-        int attempt = 2;
+        int attempt = 1;
         for (UUID uuid : uuids) {
             BluetoothSocket insecureSocket = null;
             try {
-                appendConnectionLog("Tentativa " + attempt + ": inseguro " + shortUuid(uuid) + ".");
+                appendConnectionLog("Tentativa " + attempt + ": SPP inseguro " + shortUuid(uuid) + ".");
                 insecureSocket = device.createInsecureRfcommSocketToServiceRecord(uuid);
                 insecureSocket.connect();
                 return insecureSocket;
             } catch (IOException error) {
                 lastError = error;
                 closeQuietly(insecureSocket);
-                appendConnectionLog("Inseguro falhou: " + shortError(error));
+                appendConnectionLog("SPP inseguro falhou: " + shortError(error));
                 sleepBeforeRetry();
             }
             attempt++;
@@ -285,14 +276,48 @@ public class MainActivity extends Activity {
         for (UUID uuid : uuids) {
             BluetoothSocket secureSocket = null;
             try {
-                appendConnectionLog("Tentativa " + attempt + ": seguro " + shortUuid(uuid) + ".");
+                appendConnectionLog("Tentativa " + attempt + ": SPP seguro " + shortUuid(uuid) + ".");
                 secureSocket = device.createRfcommSocketToServiceRecord(uuid);
                 secureSocket.connect();
                 return secureSocket;
             } catch (IOException error) {
                 lastError = error;
                 closeQuietly(secureSocket);
-                appendConnectionLog("Seguro falhou: " + shortError(error));
+                appendConnectionLog("SPP seguro falhou: " + shortError(error));
+                sleepBeforeRetry();
+            }
+            attempt++;
+        }
+
+        for (int channel = 1; channel <= 10; channel++) {
+            BluetoothSocket channelSocket = null;
+            try {
+                appendConnectionLog("Tentativa " + attempt + ": canal RFCOMM " + channel + ".");
+                Method method = device.getClass().getMethod("createRfcommSocket", int.class);
+                channelSocket = (BluetoothSocket) method.invoke(device, channel);
+                channelSocket.connect();
+                return channelSocket;
+            } catch (Exception error) {
+                closeQuietly(channelSocket);
+                lastError = error instanceof IOException ? (IOException) error : new IOException(error);
+                appendConnectionLog("Canal " + channel + " falhou: " + shortError(error));
+                sleepBeforeRetry();
+            }
+            attempt++;
+        }
+
+        for (int channel = 1; channel <= 10; channel++) {
+            BluetoothSocket channelSocket = null;
+            try {
+                appendConnectionLog("Tentativa " + attempt + ": canal inseguro " + channel + ".");
+                Method method = device.getClass().getMethod("createInsecureRfcommSocket", int.class);
+                channelSocket = (BluetoothSocket) method.invoke(device, channel);
+                channelSocket.connect();
+                return channelSocket;
+            } catch (Exception error) {
+                closeQuietly(channelSocket);
+                lastError = error instanceof IOException ? (IOException) error : new IOException(error);
+                appendConnectionLog("Canal inseguro " + channel + " falhou: " + shortError(error));
                 sleepBeforeRetry();
             }
             attempt++;
@@ -301,12 +326,29 @@ public class MainActivity extends Activity {
         throw lastError == null ? new IOException("Nenhuma tentativa abriu o socket.") : lastError;
     }
 
+    private void cancelDiscoveryIfAllowed() {
+        if (bluetoothAdapter == null) {
+            return;
+        }
+        try {
+            if (bluetoothAdapter.isDiscovering()) {
+                appendConnectionLog("Cancelando busca Bluetooth ativa.");
+                bluetoothAdapter.cancelDiscovery();
+            }
+        } catch (SecurityException error) {
+            appendConnectionLog("Nao foi possivel cancelar busca: " + shortError(error));
+        }
+    }
+
     private List<UUID> getCandidateUuids(BluetoothDevice device) {
         LinkedHashSet<UUID> uuidSet = new LinkedHashSet<>();
         uuidSet.add(SPP_UUID);
         if (hasBluetoothConnectPermission() && device.getUuids() != null) {
             for (android.os.ParcelUuid parcelUuid : device.getUuids()) {
-                uuidSet.add(parcelUuid.getUuid());
+                UUID uuid = parcelUuid.getUuid();
+                if (!EMPTY_UUID.equals(uuid)) {
+                    uuidSet.add(uuid);
+                }
             }
         }
         appendConnectionLog("UUIDs candidatos: " + uuidSet.size() + ".");
@@ -381,6 +423,11 @@ public class MainActivity extends Activity {
     private boolean hasBluetoothConnectPermission() {
         return Build.VERSION.SDK_INT < Build.VERSION_CODES.S
                 || checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED;
+    }
+
+    private boolean hasBluetoothScanPermission() {
+        return Build.VERSION.SDK_INT < Build.VERSION_CODES.S
+                || checkSelfPermission(Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED;
     }
 
     private void showToast(String message) {

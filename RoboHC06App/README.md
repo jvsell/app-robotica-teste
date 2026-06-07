@@ -33,4 +33,4 @@ O app lista dispositivos ja pareados. Isso evita depender de varredura Bluetooth
 
 Se a conexao falhar, feche outros apps Bluetooth serial que possam estar conectados ao HC-06. O modulo aceita apenas uma conexao ativa por vez.
 
-Em modulos HC-06, o app tenta primeiro o canal RFCOMM `1`, depois os UUIDs anunciados pelo dispositivo em modo inseguro e por ultimo em modo seguro. A tela mostra um log acumulado das tentativas.
+Em modulos HC-06, o app cancela buscas Bluetooth ativas antes de conectar, ignora UUIDs invalidos e tenta SPP inseguro, SPP seguro e canais RFCOMM `1` a `10`. A tela mostra um log acumulado das tentativas.
