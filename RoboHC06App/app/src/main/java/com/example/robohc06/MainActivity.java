@@ -45,6 +45,7 @@ public class MainActivity extends Activity {
     private static final UUID BLE_UART_SERVICE_UUID = UUID.fromString("0000FFE0-0000-1000-8000-00805F9B34FB");
     private static final UUID BLE_UART_CHARACTERISTIC_UUID = UUID.fromString("0000FFE1-0000-1000-8000-00805F9B34FB");
     private static final UUID EMPTY_UUID = UUID.fromString("00000000-0000-0000-0000-000000000000");
+    private static final long BLE_CONNECT_TIMEOUT_MS = 12000;
 
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final List<BluetoothDevice> pairedDevices = new ArrayList<>();
@@ -60,6 +61,7 @@ public class MainActivity extends Activity {
     private final StringBuilder connectionLog = new StringBuilder();
     private Button connectButton;
     private JoystickView joystickView;
+    private boolean connectingBle = false;
 
     private final Runnable commandLoop = new Runnable() {
         @Override
@@ -235,46 +237,26 @@ public class MainActivity extends Activity {
         resetConnectionLog("Tentando conectar em " + selectedDevice.getAddress());
         connectButton.setEnabled(false);
 
-        if (shouldTryBleUart(selectedDevice)) {
-            connectBleUart(selectedDevice);
-            return;
-        }
-
-        new Thread(() -> {
-            try {
-                cancelDiscoveryIfAllowed();
-                BluetoothSocket nextSocket = openSerialSocket(selectedDevice);
-                socket = nextSocket;
-                outputStream = nextSocket.getOutputStream();
-                handler.post(() -> {
-                    statusText.setText("Conectado: " + selectedDevice.getName());
-                    setConnectionLog("Conexao aberta. Enviando comandos F/T/D/E.");
-                    connectButton.setText("Desconectar");
-                    connectButton.setEnabled(true);
-                    handler.removeCallbacks(commandLoop);
-                    handler.post(commandLoop);
-                });
-            } catch (IOException error) {
-                closeConnection();
-                String errorMessage = error.getMessage() == null ? "Erro Bluetooth desconhecido." : error.getMessage();
-                handler.post(() -> {
-                    statusText.setText("Falha ao conectar: " + errorMessage);
-                    connectButton.setText("Conectar");
-                    connectButton.setEnabled(true);
-                    showToast(errorMessage);
-                });
-            }
-        }).start();
+        connectBleUart(selectedDevice);
     }
 
     private void connectBleUart(BluetoothDevice device) {
-        appendConnectionLog("Dispositivo BLE/FFE0 detectado. Tentando BLE UART.");
+        appendConnectionLog("Tentando BLE UART FFE0/FFE1 primeiro.");
+        connectingBle = true;
+        handler.postDelayed(() -> {
+            if (connectingBle && !bleConnected) {
+                appendConnectionLog("BLE demorou demais. Tentando RFCOMM.");
+                closeGattOnly();
+                connectRfcommFallback();
+            }
+        }, BLE_CONNECT_TIMEOUT_MS);
         try {
             bluetoothGatt = Build.VERSION.SDK_INT >= Build.VERSION_CODES.M
                     ? device.connectGatt(this, false, bleGattCallback, BluetoothDevice.TRANSPORT_LE)
                     : device.connectGatt(this, false, bleGattCallback);
         } catch (SecurityException error) {
             appendConnectionLog("BLE falhou por permissao: " + shortError(error));
+            connectingBle = false;
             connectRfcommFallback();
         }
     }
@@ -284,6 +266,7 @@ public class MainActivity extends Activity {
         public void onConnectionStateChange(BluetoothGatt gatt, int status, int newState) {
             if (status != BluetoothGatt.GATT_SUCCESS) {
                 appendConnectionLog("BLE status falhou: " + status + ". Tentando RFCOMM.");
+                connectingBle = false;
                 closeGattOnly();
                 connectRfcommFallback();
                 return;
@@ -295,6 +278,7 @@ public class MainActivity extends Activity {
                     gatt.discoverServices();
                 } catch (SecurityException error) {
                     appendConnectionLog("BLE discover falhou: " + shortError(error));
+                    connectingBle = false;
                     closeGattOnly();
                     connectRfcommFallback();
                 }
@@ -313,6 +297,7 @@ public class MainActivity extends Activity {
         public void onServicesDiscovered(BluetoothGatt gatt, int status) {
             if (status != BluetoothGatt.GATT_SUCCESS) {
                 appendConnectionLog("BLE servicos falharam: " + status + ". Tentando RFCOMM.");
+                connectingBle = false;
                 closeGattOnly();
                 connectRfcommFallback();
                 return;
@@ -321,6 +306,7 @@ public class MainActivity extends Activity {
             BluetoothGattCharacteristic characteristic = findBleWriteCharacteristic(gatt);
             if (characteristic == null) {
                 appendConnectionLog("BLE FFE1 nao encontrado. Tentando RFCOMM.");
+                connectingBle = false;
                 closeGattOnly();
                 connectRfcommFallback();
                 return;
@@ -329,6 +315,7 @@ public class MainActivity extends Activity {
             bleWriteCharacteristic = characteristic;
             bleWriteCharacteristic.setWriteType(BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE);
             bleConnected = true;
+            connectingBle = false;
             handler.post(() -> {
                 statusText.setText("Conectado BLE: " + selectedDevice.getName());
                 appendConnectionLog("BLE UART pronto em FFE1.");
@@ -471,28 +458,6 @@ public class MainActivity extends Activity {
         throw lastError == null ? new IOException("Nenhuma tentativa abriu o socket.") : lastError;
     }
 
-    private boolean shouldTryBleUart(BluetoothDevice device) {
-        if (!hasBluetoothConnectPermission()) {
-            return false;
-        }
-        try {
-            if (device.getType() == BluetoothDevice.DEVICE_TYPE_LE
-                    || device.getType() == BluetoothDevice.DEVICE_TYPE_DUAL) {
-                return true;
-            }
-            if (device.getUuids() != null) {
-                for (android.os.ParcelUuid parcelUuid : device.getUuids()) {
-                    if (BLE_UART_SERVICE_UUID.equals(parcelUuid.getUuid())) {
-                        return true;
-                    }
-                }
-            }
-        } catch (SecurityException error) {
-            appendConnectionLog("Nao foi possivel detectar BLE: " + shortError(error));
-        }
-        return false;
-    }
-
     private void cancelDiscoveryIfAllowed() {
         if (bluetoothAdapter == null) {
             return;
@@ -558,6 +523,7 @@ public class MainActivity extends Activity {
     }
 
     private void closeGattOnly() {
+        connectingBle = false;
         bleConnected = false;
         bleWriteCharacteristic = null;
         if (bluetoothGatt != null) {

@@ -9,3 +9,6 @@ local.properties
 
 .idea/
 *.iml
+
+.venv/
+tools/.pydeps/
