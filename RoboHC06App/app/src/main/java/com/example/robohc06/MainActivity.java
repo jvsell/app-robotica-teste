@@ -29,6 +29,7 @@ import java.io.OutputStream;
 import java.lang.reflect.Method;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
@@ -45,6 +46,7 @@ public class MainActivity extends Activity {
     private OutputStream outputStream;
     private TextView statusText;
     private TextView logText;
+    private final StringBuilder connectionLog = new StringBuilder();
     private Button connectButton;
     private JoystickView joystickView;
 
@@ -97,6 +99,7 @@ public class MainActivity extends Activity {
         logText.setTextSize(13);
         logText.setTextColor(Color.rgb(55, 65, 81));
         logText.setPadding(0, 8, 0, 8);
+        logText.setMaxLines(10);
 
         Spinner deviceSpinner = new Spinner(this);
         deviceSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
@@ -215,7 +218,7 @@ public class MainActivity extends Activity {
         }
 
         statusText.setText("Conectando...");
-        setConnectionLog("Tentando conectar em " + selectedDevice.getAddress());
+        resetConnectionLog("Tentando conectar em " + selectedDevice.getAddress());
         connectButton.setEnabled(false);
 
         new Thread(() -> {
@@ -246,10 +249,11 @@ public class MainActivity extends Activity {
 
     private BluetoothSocket openSerialSocket(BluetoothDevice device) throws IOException {
         IOException lastError = null;
+        List<UUID> uuids = getCandidateUuids(device);
 
         BluetoothSocket channelSocket = null;
         try {
-            setConnectionLog("Tentativa 1: canal RFCOMM 1.");
+            appendConnectionLog("Tentativa 1: canal RFCOMM 1.");
             Method method = device.getClass().getMethod("createRfcommSocket", int.class);
             channelSocket = (BluetoothSocket) method.invoke(device, 1);
             channelSocket.connect();
@@ -257,36 +261,56 @@ public class MainActivity extends Activity {
         } catch (Exception error) {
             closeQuietly(channelSocket);
             lastError = error instanceof IOException ? (IOException) error : new IOException(error);
-            setConnectionLog("Canal 1 falhou: " + shortError(error));
+            appendConnectionLog("Canal 1 falhou: " + shortError(error));
             sleepBeforeRetry();
         }
 
-        BluetoothSocket insecureSocket = null;
-        try {
-            setConnectionLog("Tentativa 2: SPP inseguro.");
-            insecureSocket = device.createInsecureRfcommSocketToServiceRecord(SPP_UUID);
-            insecureSocket.connect();
-            return insecureSocket;
-        } catch (IOException error) {
-            lastError = error;
-            closeQuietly(insecureSocket);
-            setConnectionLog("SPP inseguro falhou: " + shortError(error));
-            sleepBeforeRetry();
+        int attempt = 2;
+        for (UUID uuid : uuids) {
+            BluetoothSocket insecureSocket = null;
+            try {
+                appendConnectionLog("Tentativa " + attempt + ": inseguro " + shortUuid(uuid) + ".");
+                insecureSocket = device.createInsecureRfcommSocketToServiceRecord(uuid);
+                insecureSocket.connect();
+                return insecureSocket;
+            } catch (IOException error) {
+                lastError = error;
+                closeQuietly(insecureSocket);
+                appendConnectionLog("Inseguro falhou: " + shortError(error));
+                sleepBeforeRetry();
+            }
+            attempt++;
         }
 
-        BluetoothSocket secureSocket = null;
-        try {
-            setConnectionLog("Tentativa 3: SPP seguro.");
-            secureSocket = device.createRfcommSocketToServiceRecord(SPP_UUID);
-            secureSocket.connect();
-            return secureSocket;
-        } catch (IOException error) {
-            lastError = error;
-            closeQuietly(secureSocket);
-            setConnectionLog("SPP seguro falhou: " + shortError(error));
+        for (UUID uuid : uuids) {
+            BluetoothSocket secureSocket = null;
+            try {
+                appendConnectionLog("Tentativa " + attempt + ": seguro " + shortUuid(uuid) + ".");
+                secureSocket = device.createRfcommSocketToServiceRecord(uuid);
+                secureSocket.connect();
+                return secureSocket;
+            } catch (IOException error) {
+                lastError = error;
+                closeQuietly(secureSocket);
+                appendConnectionLog("Seguro falhou: " + shortError(error));
+                sleepBeforeRetry();
+            }
+            attempt++;
         }
 
         throw lastError == null ? new IOException("Nenhuma tentativa abriu o socket.") : lastError;
+    }
+
+    private List<UUID> getCandidateUuids(BluetoothDevice device) {
+        LinkedHashSet<UUID> uuidSet = new LinkedHashSet<>();
+        uuidSet.add(SPP_UUID);
+        if (hasBluetoothConnectPermission() && device.getUuids() != null) {
+            for (android.os.ParcelUuid parcelUuid : device.getUuids()) {
+                uuidSet.add(parcelUuid.getUuid());
+            }
+        }
+        appendConnectionLog("UUIDs candidatos: " + uuidSet.size() + ".");
+        return new ArrayList<>(uuidSet);
     }
 
     private void disconnect() {
@@ -372,6 +396,24 @@ public class MainActivity extends Activity {
                 logText.setText("Log: " + message);
             }
         });
+    }
+
+    private void resetConnectionLog(String message) {
+        connectionLog.setLength(0);
+        appendConnectionLog(message);
+    }
+
+    private void appendConnectionLog(String message) {
+        if (connectionLog.length() > 0) {
+            connectionLog.append('\n');
+        }
+        connectionLog.append(message);
+        setConnectionLog(connectionLog.toString());
+    }
+
+    private String shortUuid(UUID uuid) {
+        String value = uuid.toString();
+        return value.length() <= 8 ? value : value.substring(0, 8);
     }
 
     private String shortError(Exception error) {
