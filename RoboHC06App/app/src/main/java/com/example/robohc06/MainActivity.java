@@ -26,6 +26,7 @@ import android.widget.Toast;
 
 import java.io.IOException;
 import java.io.OutputStream;
+import java.lang.reflect.Method;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
@@ -210,8 +211,7 @@ public class MainActivity extends Activity {
 
         new Thread(() -> {
             try {
-                BluetoothSocket nextSocket = selectedDevice.createRfcommSocketToServiceRecord(SPP_UUID);
-                nextSocket.connect();
+                BluetoothSocket nextSocket = openSerialSocket(selectedDevice);
                 socket = nextSocket;
                 outputStream = nextSocket.getOutputStream();
                 handler.post(() -> {
@@ -223,14 +223,53 @@ public class MainActivity extends Activity {
                 });
             } catch (IOException error) {
                 closeConnection();
+                String errorMessage = error.getMessage() == null ? "Erro Bluetooth desconhecido." : error.getMessage();
                 handler.post(() -> {
-                    statusText.setText("Falha ao conectar.");
+                    statusText.setText("Falha ao conectar: " + errorMessage);
                     connectButton.setText("Conectar");
                     connectButton.setEnabled(true);
-                    showToast(error.getMessage());
+                    showToast(errorMessage);
                 });
             }
         }).start();
+    }
+
+    private BluetoothSocket openSerialSocket(BluetoothDevice device) throws IOException {
+        IOException lastError = null;
+
+        BluetoothSocket secureSocket = null;
+        try {
+            secureSocket = device.createRfcommSocketToServiceRecord(SPP_UUID);
+            secureSocket.connect();
+            return secureSocket;
+        } catch (IOException error) {
+            lastError = error;
+            closeQuietly(secureSocket);
+        }
+
+        BluetoothSocket insecureSocket = null;
+        try {
+            insecureSocket = device.createInsecureRfcommSocketToServiceRecord(SPP_UUID);
+            insecureSocket.connect();
+            return insecureSocket;
+        } catch (IOException error) {
+            lastError = error;
+            closeQuietly(insecureSocket);
+        }
+
+        BluetoothSocket channelSocket = null;
+        try {
+            Method method = device.getClass().getMethod("createRfcommSocket", int.class);
+            channelSocket = (BluetoothSocket) method.invoke(device, 1);
+            channelSocket.connect();
+            return channelSocket;
+        } catch (Exception error) {
+            closeQuietly(channelSocket);
+            if (lastError != null) {
+                throw lastError;
+            }
+            throw new IOException(error);
+        }
     }
 
     private void disconnect() {
@@ -261,6 +300,16 @@ public class MainActivity extends Activity {
         }
         outputStream = null;
         socket = null;
+    }
+
+    private void closeQuietly(BluetoothSocket bluetoothSocket) {
+        if (bluetoothSocket == null) {
+            return;
+        }
+        try {
+            bluetoothSocket.close();
+        } catch (IOException ignored) {
+        }
     }
 
     private boolean isConnected() {

@@ -30,3 +30,5 @@ Aplicativo Android simples para controlar o sketch `v2.ino` por Bluetooth classi
 ## Observacoes
 
 O app lista dispositivos ja pareados. Isso evita depender de varredura Bluetooth, que costuma ser a parte mais instavel em Android recente.
+
+Se a conexao falhar, feche outros apps Bluetooth serial que possam estar conectados ao HC-06. O modulo aceita apenas uma conexao ativa por vez.
