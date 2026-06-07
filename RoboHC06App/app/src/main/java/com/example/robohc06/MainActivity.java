@@ -4,7 +4,12 @@ import android.Manifest;
 import android.app.Activity;
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
+import android.bluetooth.BluetoothGatt;
+import android.bluetooth.BluetoothGattCallback;
+import android.bluetooth.BluetoothGattCharacteristic;
+import android.bluetooth.BluetoothGattService;
 import android.bluetooth.BluetoothSocket;
+import android.bluetooth.BluetoothProfile;
 import android.content.pm.PackageManager;
 import android.graphics.Canvas;
 import android.graphics.Color;
@@ -37,6 +42,8 @@ import java.util.UUID;
 public class MainActivity extends Activity {
     private static final int REQUEST_BLUETOOTH_CONNECT = 10;
     private static final UUID SPP_UUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB");
+    private static final UUID BLE_UART_SERVICE_UUID = UUID.fromString("0000FFE0-0000-1000-8000-00805F9B34FB");
+    private static final UUID BLE_UART_CHARACTERISTIC_UUID = UUID.fromString("0000FFE1-0000-1000-8000-00805F9B34FB");
     private static final UUID EMPTY_UUID = UUID.fromString("00000000-0000-0000-0000-000000000000");
 
     private final Handler handler = new Handler(Looper.getMainLooper());
@@ -45,6 +52,9 @@ public class MainActivity extends Activity {
     private BluetoothDevice selectedDevice;
     private BluetoothSocket socket;
     private OutputStream outputStream;
+    private BluetoothGatt bluetoothGatt;
+    private BluetoothGattCharacteristic bleWriteCharacteristic;
+    private boolean bleConnected = false;
     private TextView statusText;
     private TextView logText;
     private final StringBuilder connectionLog = new StringBuilder();
@@ -225,6 +235,11 @@ public class MainActivity extends Activity {
         resetConnectionLog("Tentando conectar em " + selectedDevice.getAddress());
         connectButton.setEnabled(false);
 
+        if (shouldTryBleUart(selectedDevice)) {
+            connectBleUart(selectedDevice);
+            return;
+        }
+
         new Thread(() -> {
             try {
                 cancelDiscoveryIfAllowed();
@@ -234,6 +249,136 @@ public class MainActivity extends Activity {
                 handler.post(() -> {
                     statusText.setText("Conectado: " + selectedDevice.getName());
                     setConnectionLog("Conexao aberta. Enviando comandos F/T/D/E.");
+                    connectButton.setText("Desconectar");
+                    connectButton.setEnabled(true);
+                    handler.removeCallbacks(commandLoop);
+                    handler.post(commandLoop);
+                });
+            } catch (IOException error) {
+                closeConnection();
+                String errorMessage = error.getMessage() == null ? "Erro Bluetooth desconhecido." : error.getMessage();
+                handler.post(() -> {
+                    statusText.setText("Falha ao conectar: " + errorMessage);
+                    connectButton.setText("Conectar");
+                    connectButton.setEnabled(true);
+                    showToast(errorMessage);
+                });
+            }
+        }).start();
+    }
+
+    private void connectBleUart(BluetoothDevice device) {
+        appendConnectionLog("Dispositivo BLE/FFE0 detectado. Tentando BLE UART.");
+        try {
+            bluetoothGatt = Build.VERSION.SDK_INT >= Build.VERSION_CODES.M
+                    ? device.connectGatt(this, false, bleGattCallback, BluetoothDevice.TRANSPORT_LE)
+                    : device.connectGatt(this, false, bleGattCallback);
+        } catch (SecurityException error) {
+            appendConnectionLog("BLE falhou por permissao: " + shortError(error));
+            connectRfcommFallback();
+        }
+    }
+
+    private final BluetoothGattCallback bleGattCallback = new BluetoothGattCallback() {
+        @Override
+        public void onConnectionStateChange(BluetoothGatt gatt, int status, int newState) {
+            if (status != BluetoothGatt.GATT_SUCCESS) {
+                appendConnectionLog("BLE status falhou: " + status + ". Tentando RFCOMM.");
+                closeGattOnly();
+                connectRfcommFallback();
+                return;
+            }
+
+            if (newState == BluetoothProfile.STATE_CONNECTED) {
+                appendConnectionLog("BLE conectado. Descobrindo servicos.");
+                try {
+                    gatt.discoverServices();
+                } catch (SecurityException error) {
+                    appendConnectionLog("BLE discover falhou: " + shortError(error));
+                    closeGattOnly();
+                    connectRfcommFallback();
+                }
+            } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
+                appendConnectionLog("BLE desconectado.");
+                closeGattOnly();
+                handler.post(() -> {
+                    connectButton.setText("Conectar");
+                    connectButton.setEnabled(true);
+                    statusText.setText("Desconectado.");
+                });
+            }
+        }
+
+        @Override
+        public void onServicesDiscovered(BluetoothGatt gatt, int status) {
+            if (status != BluetoothGatt.GATT_SUCCESS) {
+                appendConnectionLog("BLE servicos falharam: " + status + ". Tentando RFCOMM.");
+                closeGattOnly();
+                connectRfcommFallback();
+                return;
+            }
+
+            BluetoothGattCharacteristic characteristic = findBleWriteCharacteristic(gatt);
+            if (characteristic == null) {
+                appendConnectionLog("BLE FFE1 nao encontrado. Tentando RFCOMM.");
+                closeGattOnly();
+                connectRfcommFallback();
+                return;
+            }
+
+            bleWriteCharacteristic = characteristic;
+            bleWriteCharacteristic.setWriteType(BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE);
+            bleConnected = true;
+            handler.post(() -> {
+                statusText.setText("Conectado BLE: " + selectedDevice.getName());
+                appendConnectionLog("BLE UART pronto em FFE1.");
+                connectButton.setText("Desconectar");
+                connectButton.setEnabled(true);
+                handler.removeCallbacks(commandLoop);
+                handler.post(commandLoop);
+            });
+        }
+    };
+
+    private BluetoothGattCharacteristic findBleWriteCharacteristic(BluetoothGatt gatt) {
+        BluetoothGattService uartService = gatt.getService(BLE_UART_SERVICE_UUID);
+        if (uartService != null) {
+            BluetoothGattCharacteristic uartCharacteristic = uartService.getCharacteristic(BLE_UART_CHARACTERISTIC_UUID);
+            if (isWritable(uartCharacteristic)) {
+                return uartCharacteristic;
+            }
+        }
+
+        for (BluetoothGattService service : gatt.getServices()) {
+            for (BluetoothGattCharacteristic characteristic : service.getCharacteristics()) {
+                if (isWritable(characteristic)) {
+                    appendConnectionLog("BLE usando caracteristica gravavel " + shortUuid(characteristic.getUuid()) + ".");
+                    return characteristic;
+                }
+            }
+        }
+        return null;
+    }
+
+    private boolean isWritable(BluetoothGattCharacteristic characteristic) {
+        if (characteristic == null) {
+            return false;
+        }
+        int properties = characteristic.getProperties();
+        return (properties & BluetoothGattCharacteristic.PROPERTY_WRITE) != 0
+                || (properties & BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE) != 0;
+    }
+
+    private void connectRfcommFallback() {
+        new Thread(() -> {
+            try {
+                cancelDiscoveryIfAllowed();
+                BluetoothSocket nextSocket = openSerialSocket(selectedDevice);
+                socket = nextSocket;
+                outputStream = nextSocket.getOutputStream();
+                handler.post(() -> {
+                    statusText.setText("Conectado RFCOMM: " + selectedDevice.getName());
+                    appendConnectionLog("Conexao RFCOMM aberta.");
                     connectButton.setText("Desconectar");
                     connectButton.setEnabled(true);
                     handler.removeCallbacks(commandLoop);
@@ -326,6 +471,28 @@ public class MainActivity extends Activity {
         throw lastError == null ? new IOException("Nenhuma tentativa abriu o socket.") : lastError;
     }
 
+    private boolean shouldTryBleUart(BluetoothDevice device) {
+        if (!hasBluetoothConnectPermission()) {
+            return false;
+        }
+        try {
+            if (device.getType() == BluetoothDevice.DEVICE_TYPE_LE
+                    || device.getType() == BluetoothDevice.DEVICE_TYPE_DUAL) {
+                return true;
+            }
+            if (device.getUuids() != null) {
+                for (android.os.ParcelUuid parcelUuid : device.getUuids()) {
+                    if (BLE_UART_SERVICE_UUID.equals(parcelUuid.getUuid())) {
+                        return true;
+                    }
+                }
+            }
+        } catch (SecurityException error) {
+            appendConnectionLog("Nao foi possivel detectar BLE: " + shortError(error));
+        }
+        return false;
+    }
+
     private void cancelDiscoveryIfAllowed() {
         if (bluetoothAdapter == null) {
             return;
@@ -384,6 +551,22 @@ public class MainActivity extends Activity {
         }
         outputStream = null;
         socket = null;
+        if (bleConnected) {
+            writeBleRaw("F0T0D0E0\n");
+        }
+        closeGattOnly();
+    }
+
+    private void closeGattOnly() {
+        bleConnected = false;
+        bleWriteCharacteristic = null;
+        if (bluetoothGatt != null) {
+            try {
+                bluetoothGatt.close();
+            } catch (SecurityException ignored) {
+            }
+        }
+        bluetoothGatt = null;
     }
 
     private void closeQuietly(BluetoothSocket bluetoothSocket) {
@@ -397,7 +580,8 @@ public class MainActivity extends Activity {
     }
 
     private boolean isConnected() {
-        return socket != null && socket.isConnected() && outputStream != null;
+        return (socket != null && socket.isConnected() && outputStream != null)
+                || (bleConnected && bluetoothGatt != null && bleWriteCharacteristic != null);
     }
 
     private void sendJoystickCommand() {
@@ -412,10 +596,42 @@ public class MainActivity extends Activity {
         if (!isConnected()) {
             return;
         }
+        if (bleConnected && bluetoothGatt != null && bleWriteCharacteristic != null) {
+            writeBleRaw(command);
+            return;
+        }
         try {
             outputStream.write(command.getBytes(StandardCharsets.US_ASCII));
             outputStream.flush();
         } catch (IOException error) {
+            disconnect();
+        }
+    }
+
+    private void writeBleRaw(String command) {
+        if (bluetoothGatt == null || bleWriteCharacteristic == null) {
+            return;
+        }
+        byte[] payload = command.getBytes(StandardCharsets.US_ASCII);
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                int result = bluetoothGatt.writeCharacteristic(
+                        bleWriteCharacteristic,
+                        payload,
+                        BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
+                );
+                if (result != BluetoothGatt.GATT_SUCCESS) {
+                    appendConnectionLog("BLE write falhou: " + result);
+                }
+            } else {
+                bleWriteCharacteristic.setValue(payload);
+                bleWriteCharacteristic.setWriteType(BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE);
+                if (!bluetoothGatt.writeCharacteristic(bleWriteCharacteristic)) {
+                    appendConnectionLog("BLE write falhou.");
+                }
+            }
+        } catch (SecurityException error) {
+            appendConnectionLog("BLE write sem permissao: " + shortError(error));
             disconnect();
         }
     }
