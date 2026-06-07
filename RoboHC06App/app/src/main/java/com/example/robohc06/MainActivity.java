@@ -14,6 +14,8 @@ import android.content.pm.PackageManager;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
+import android.graphics.Typeface;
+import android.graphics.drawable.GradientDrawable;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
@@ -40,6 +42,13 @@ import java.util.Set;
 import java.util.UUID;
 
 public class MainActivity extends Activity {
+    private static final int COLOR_BACKGROUND = Color.rgb(242, 245, 249);
+    private static final int COLOR_SURFACE = Color.WHITE;
+    private static final int COLOR_TEXT = Color.rgb(15, 23, 42);
+    private static final int COLOR_MUTED = Color.rgb(71, 85, 105);
+    private static final int COLOR_PRIMARY = Color.rgb(20, 184, 166);
+    private static final int COLOR_PRIMARY_DARK = Color.rgb(15, 118, 110);
+    private static final int COLOR_DANGER = Color.rgb(239, 68, 68);
     private static final int REQUEST_BLUETOOTH_CONNECT = 10;
     private static final UUID SPP_UUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB");
     private static final UUID BLE_UART_SERVICE_UUID = UUID.fromString("0000FFE0-0000-1000-8000-00805F9B34FB");
@@ -93,31 +102,36 @@ public class MainActivity extends Activity {
     private void buildLayout() {
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(32, 32, 32, 32);
+        root.setPadding(28, 28, 28, 28);
         root.setGravity(Gravity.CENTER_HORIZONTAL);
-        root.setBackgroundColor(Color.rgb(245, 247, 250));
+        root.setBackgroundColor(COLOR_BACKGROUND);
 
         TextView title = new TextView(this);
         title.setText("Robo HC-06");
-        title.setTextSize(28);
-        title.setTextColor(Color.rgb(17, 24, 39));
+        title.setTextSize(30);
+        title.setTypeface(Typeface.DEFAULT_BOLD);
+        title.setTextColor(COLOR_TEXT);
         title.setGravity(Gravity.CENTER);
 
         statusText = new TextView(this);
         statusText.setText("Pareie o HC-06 no Android e conecte aqui.");
         statusText.setTextSize(16);
-        statusText.setTextColor(Color.rgb(75, 85, 99));
+        statusText.setTextColor(COLOR_PRIMARY_DARK);
         statusText.setGravity(Gravity.CENTER);
-        statusText.setPadding(0, 16, 0, 16);
+        statusText.setPadding(22, 14, 22, 14);
+        statusText.setBackground(createRoundedBackground(Color.rgb(204, 251, 241), 28, 0));
 
         logText = new TextView(this);
         logText.setText("Log: aguardando conexao.");
         logText.setTextSize(13);
-        logText.setTextColor(Color.rgb(55, 65, 81));
-        logText.setPadding(0, 8, 0, 8);
+        logText.setTextColor(COLOR_MUTED);
+        logText.setPadding(22, 18, 22, 18);
         logText.setMaxLines(10);
+        logText.setBackground(createRoundedBackground(COLOR_SURFACE, 18, Color.rgb(226, 232, 240)));
 
         Spinner deviceSpinner = new Spinner(this);
+        deviceSpinner.setPadding(12, 8, 12, 8);
+        deviceSpinner.setBackground(createRoundedBackground(COLOR_SURFACE, 14, Color.rgb(203, 213, 225)));
         deviceSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
             @Override
             public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
@@ -132,6 +146,7 @@ public class MainActivity extends Activity {
 
         connectButton = new Button(this);
         connectButton.setText("Conectar");
+        styleButton(connectButton, COLOR_PRIMARY_DARK);
         connectButton.setOnClickListener(v -> {
             if (isConnected()) {
                 disconnect();
@@ -142,6 +157,7 @@ public class MainActivity extends Activity {
 
         Button stopButton = new Button(this);
         stopButton.setText("Parar");
+        styleButton(stopButton, COLOR_DANGER);
         stopButton.setOnClickListener(v -> {
             joystickView.center();
             sendRawCommand("F0T0D0E0\n");
@@ -155,12 +171,24 @@ public class MainActivity extends Activity {
         );
         matchWrap.setMargins(0, 12, 0, 12);
 
+        LinearLayout buttons = new LinearLayout(this);
+        buttons.setOrientation(LinearLayout.HORIZONTAL);
+        buttons.setGravity(Gravity.CENTER);
+
+        LinearLayout.LayoutParams buttonParams = new LinearLayout.LayoutParams(
+                0,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                1
+        );
+        buttonParams.setMargins(6, 0, 6, 0);
+        buttons.addView(connectButton, buttonParams);
+        buttons.addView(stopButton, buttonParams);
+
         root.addView(title, matchWrap);
         root.addView(statusText, matchWrap);
-        root.addView(logText, matchWrap);
         root.addView(deviceSpinner, matchWrap);
-        root.addView(connectButton, matchWrap);
-        root.addView(stopButton, matchWrap);
+        root.addView(buttons, matchWrap);
+        root.addView(logText, matchWrap);
         root.addView(joystickView, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 0,
@@ -173,6 +201,25 @@ public class MainActivity extends Activity {
 
     private Spinner getDeviceSpinner() {
         return (Spinner) ((View) statusText.getParent()).findViewWithTag("deviceSpinner");
+    }
+
+    private GradientDrawable createRoundedBackground(int color, int radius, int strokeColor) {
+        GradientDrawable drawable = new GradientDrawable();
+        drawable.setColor(color);
+        drawable.setCornerRadius(radius);
+        if (strokeColor != 0) {
+            drawable.setStroke(2, strokeColor);
+        }
+        return drawable;
+    }
+
+    private void styleButton(Button button, int color) {
+        button.setAllCaps(false);
+        button.setTextSize(16);
+        button.setTextColor(Color.WHITE);
+        button.setTypeface(Typeface.DEFAULT_BOLD);
+        button.setPadding(18, 12, 18, 12);
+        button.setBackground(createRoundedBackground(color, 14, 0));
     }
 
     private void requestBluetoothPermissionIfNeeded() {
@@ -697,15 +744,24 @@ public class MainActivity extends Activity {
         private final Paint basePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Paint knobPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Paint axisPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint ringPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint labelPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private float x;
         private float y;
 
         public JoystickView(Activity context) {
             super(context);
-            basePaint.setColor(Color.rgb(209, 213, 219));
-            knobPaint.setColor(Color.rgb(15, 118, 110));
-            axisPaint.setColor(Color.rgb(107, 114, 128));
-            axisPaint.setStrokeWidth(4f);
+            basePaint.setColor(Color.rgb(226, 232, 240));
+            knobPaint.setColor(COLOR_PRIMARY_DARK);
+            axisPaint.setColor(Color.rgb(148, 163, 184));
+            axisPaint.setStrokeWidth(3f);
+            ringPaint.setStyle(Paint.Style.STROKE);
+            ringPaint.setStrokeWidth(8f);
+            ringPaint.setColor(COLOR_PRIMARY);
+            labelPaint.setColor(COLOR_MUTED);
+            labelPaint.setTextAlign(Paint.Align.CENTER);
+            labelPaint.setTextSize(28f);
+            labelPaint.setTypeface(Typeface.DEFAULT_BOLD);
         }
 
         @Override
@@ -722,8 +778,13 @@ public class MainActivity extends Activity {
             float knobRadius = radius * 0.28f;
 
             canvas.drawCircle(centerX, centerY, radius, basePaint);
+            canvas.drawCircle(centerX, centerY, radius + 8f, ringPaint);
             canvas.drawLine(centerX - radius, centerY, centerX + radius, centerY, axisPaint);
             canvas.drawLine(centerX, centerY - radius, centerX, centerY + radius, axisPaint);
+            canvas.drawText("F", centerX, centerY - radius - 28f, labelPaint);
+            canvas.drawText("T", centerX, centerY + radius + 48f, labelPaint);
+            canvas.drawText("E", centerX - radius - 36f, centerY + 10f, labelPaint);
+            canvas.drawText("D", centerX + radius + 36f, centerY + 10f, labelPaint);
             canvas.drawCircle(x, y, knobRadius, knobPaint);
         }
 
