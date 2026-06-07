@@ -68,7 +68,7 @@ public class MainActivity extends Activity {
         @Override
         public void run() {
             sendJoystickCommand();
-            handler.postDelayed(this, bleConnected ? 200 : 80);
+            handler.postDelayed(this, bleConnected ? 300 : 80);
         }
     };
 
@@ -314,7 +314,7 @@ public class MainActivity extends Activity {
             }
 
             bleWriteCharacteristic = characteristic;
-            bleWriteCharacteristic.setWriteType(BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE);
+            bleWriteCharacteristic.setWriteType(BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT);
             bleConnected = true;
             connectingBle = false;
             handler.post(() -> {
@@ -591,14 +591,14 @@ public class MainActivity extends Activity {
                 int result = bluetoothGatt.writeCharacteristic(
                         bleWriteCharacteristic,
                         payload,
-                        BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
+                        BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
                 );
                 if (result != BluetoothGatt.GATT_SUCCESS) {
                     appendConnectionLog("BLE write falhou: " + result);
                 }
             } else {
                 bleWriteCharacteristic.setValue(payload);
-                bleWriteCharacteristic.setWriteType(BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE);
+                bleWriteCharacteristic.setWriteType(BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT);
                 if (!bluetoothGatt.writeCharacteristic(bleWriteCharacteristic)) {
                     appendConnectionLog("BLE write falhou.");
                 }

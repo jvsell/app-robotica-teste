@@ -56,20 +56,30 @@ async def run_test(args):
             for characteristic in service.characteristics:
                 print(f"  Caracteristica: {characteristic.uuid} props={characteristic.properties}")
 
+        if args.notify:
+            print(f"Habilitando notify em {UART_CHARACTERISTIC_UUID}...")
+            await client.start_notify(UART_CHARACTERISTIC_UUID, lambda _sender, data: print(f"Notify: {data!r}"))
+            await asyncio.sleep(1)
+
+        if args.before > 0:
+            print(f"Aguardando {args.before:.1f}s antes de enviar...")
+            await asyncio.sleep(args.before)
+
         characteristic_uuid = args.characteristic.lower()
         print(f"Enviando em {characteristic_uuid}: {command.strip()}")
         await client.write_gatt_char(
             characteristic_uuid,
             command.encode("ascii"),
-            response=False,
+            response=args.response,
         )
         time.sleep(args.hold)
         print("Enviando parada: F0T0D0E0")
         await client.write_gatt_char(
             characteristic_uuid,
             b"F0T0D0E0\n",
-            response=False,
+            response=args.response,
         )
+        await asyncio.sleep(args.after)
 
     print("Teste BLE concluido.")
 
@@ -84,9 +94,13 @@ def main():
         default=UART_WRITE_CHARACTERISTIC_UUID,
         help="Caracteristica BLE para escrita. Padrao: FFE2.",
     )
+    parser.add_argument("--response", action="store_true", help="Usa escrita BLE com resposta.")
     parser.add_argument("--hold", type=float, default=0.5, help="Tempo antes de enviar parada.")
+    parser.add_argument("--before", type=float, default=0.0, help="Tempo conectado antes de enviar.")
+    parser.add_argument("--after", type=float, default=1.0, help="Tempo conectado depois da parada.")
     parser.add_argument("--timeout", type=float, default=10.0, help="Timeout de scan/conexao.")
     parser.add_argument("--scan", action="store_true", help="Apenas lista dispositivos BLE.")
+    parser.add_argument("--notify", action="store_true", help="Habilita notify em FFE1 antes de escrever.")
     args = parser.parse_args()
 
     try:

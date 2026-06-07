@@ -33,4 +33,4 @@ O app lista dispositivos ja pareados. Isso evita depender de varredura Bluetooth
 
 Se a conexao falhar, feche outros apps Bluetooth serial que possam estar conectados ao HC-06. O modulo aceita apenas uma conexao ativa por vez.
 
-Alguns modulos vendidos como HC-06 aparecem no Windows/Android como BLE UART (`FFE0`/`FFE1`/`FFE2`) em vez de Bluetooth classico SPP. O app tenta BLE UART primeiro, prefere `FFE2` para escrita quando existir, e usa RFCOMM como fallback depois de timeout.
+Alguns modulos vendidos como HC-06 aparecem no Windows/Android como BLE UART (`FFE0`/`FFE1`/`FFE2`) em vez de Bluetooth classico SPP. O app tenta BLE UART primeiro, prefere `FFE2` para escrita quando existir, escreve com resposta, e usa RFCOMM como fallback depois de timeout.
